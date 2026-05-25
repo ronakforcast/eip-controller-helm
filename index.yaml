@@ -1,0 +1,31 @@
+apiVersion: v1
+entries:
+  eip-controller:
+  - annotations:
+      artifacthub.io/changes: |
+        - kind: added
+          description: Initial release
+      artifacthub.io/license: Apache-2.0
+    apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-05-25T11:24:24.354792+05:30"
+    description: Per-pod Elastic IP lifecycle controller for EKS scraper workloads
+    digest: 347e7340b18dbeb5b2911a5d44ef2c47f44cd8c33552f4f9193783d273e69928
+    home: https://github.com/ronakforcast/eip-controller-helm
+    keywords:
+    - kubernetes
+    - aws
+    - eip
+    - controller
+    - networking
+    - eks
+    maintainers:
+    - name: ronakforcast
+    name: eip-controller
+    sources:
+    - https://github.com/ronakforcast/eip-controller-helm
+    type: application
+    urls:
+    - https://ronakforcast.github.io/eip-controller-helm/eip-controller-0.1.0.tgz
+    version: 0.1.0
+generated: "2026-05-25T11:24:24.354325+05:30"
