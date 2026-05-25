@@ -2,6 +2,69 @@
 
 Helm chart for deploying the EIP Controller — a Kubernetes operator that assigns a dedicated AWS Elastic IP to each annotated scraper pod on EKS.
 
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph EKS["EKS Cluster"]
+        subgraph CTRL_NS["Namespace · eip-controller"]
+            direction LR
+            CA["Controller Pod\n(active leader)"]
+            CS["Controller Pod\n(standby)"]
+            LL[("Leader\nLease")]
+            CA -- holds --> LL
+            CS -. watches .-> LL
+        end
+
+        subgraph SCRAPER_NS["Namespace · scrapers  (scales to N pods)"]
+            P1["Scraper Pod 1\nEIP: 3.66.x.x"]
+            P2["Scraper Pod 2\nEIP: 18.194.x.x"]
+            PN["Scraper Pod N\nEIP: 63.180.x.x"]
+        end
+
+        AWSN["aws-node DaemonSet\nEXTERNALSNAT=true"]
+    end
+
+    subgraph AWS["AWS Account"]
+        IRSA["IAM Role\nvia IRSA"]
+        EC2["EC2 API"]
+
+        subgraph EIPS["Elastic IPs  (1 per pod)"]
+            E1["3.66.x.x"]
+            E2["18.194.x.x"]
+            EN["63.180.x.x"]
+        end
+
+        ENI1["ENI · Node 1"]
+        ENI2["ENI · Node 2"]
+        IGW["Internet Gateway"]
+    end
+
+    BAM["IP Registry\nBAM Service"]
+    WEB["Target Websites"]
+
+    CA -- "1  watch pods with\neip-managed=true annotation" --> SCRAPER_NS
+    CA -- "2  AllocateAddress\nAssociateAddress\nReleaseAddress\nDescribeAddresses" --> EC2
+    CA -- "AssumeRoleWithWebIdentity" --> IRSA
+    IRSA --> EC2
+    EC2 --> EIPS
+    E1 -- "associated to\npod private IP" --> ENI1
+    E2 & EN -- "associated to\npod private IP" --> ENI2
+    AWSN -. "assigns secondary\nIPs to pods" .-> ENI1 & ENI2
+    P1 --> ENI1
+    P2 & PN --> ENI2
+    ENI1 & ENI2 -- "egress via\nassigned EIP" --> IGW
+    IGW --> WEB
+    CA -- "3  register / remove\nbest-effort, non-blocking" --> BAM
+```
+
+**Key design points at scale:**
+- Two controller replicas with leader election — only the active leader reconciles; the standby takes over within seconds if the leader crashes
+- Each scraper pod gets its own EIP mapped at the ENI level — traffic egresses from that specific public IP with no NAT
+- A Kubernetes finalizer holds pods in `Terminating` until their EIP is cleanly released — zero leaked IPs even during node failures
+- An orphan reconciler runs every 5 minutes to catch any EIPs that slipped through (e.g. controller crash between allocate and annotate)
+- BAM notifications are best-effort — EIP assignment never blocks on registry availability
+
 ## Install
 
 ```bash
