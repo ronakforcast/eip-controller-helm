@@ -1,0 +1,14 @@
+{{- if gt (int .Values.controller.replicas) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "eip-controller.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "eip-controller.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "eip-controller.selectorLabels" . | nindent 6 }}
+{{- end }}

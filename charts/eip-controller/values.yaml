@@ -1,0 +1,48 @@
+controller:
+  image:
+    repository: your-registry/eip-controller
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # EC2 API rate limiting — keep below AWS token bucket of 50/5s
+  ec2RatePerSec: "5"
+  ec2Burst: "45"
+  # How often the orphan reconciler checks for leaked EIPs
+  orphanInterval: 5m
+
+aws:
+  region: us-east-1
+  clusterName: ""   # Required — used to tag EIPs for scoped cleanup
+
+bam:
+  registerURL: ""   # Required — e.g. http://bam-service.internal/api/v1/register
+  removeURL: ""     # Required — e.g. http://bam-service.internal/api/v1/remove
+  # API key is read from the bam-credentials Secret (key: api-key).
+  # Leave existingSecret empty to skip (if BAM has no auth).
+  existingSecret: ""
+
+serviceAccount:
+  create: true
+  name: eip-controller
+  # Annotations added to the service account — use this for IRSA:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/EIPController
+  annotations: {}
+
+leaderElection:
+  enabled: true
+
+prometheusRule:
+  # Set to true if your cluster has the Prometheus Operator installed and you
+  # want alert rules deployed automatically.
+  enabled: false
+  # Labels required for Prometheus Operator to pick up the PrometheusRule CRD.
+  # Match the ruleSelector on your Prometheus resource (commonly "release: prometheus").
+  additionalLabels: {}
+  #   release: prometheus

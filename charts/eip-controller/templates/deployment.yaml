@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "eip-controller.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "eip-controller.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.controller.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: eip-controller
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: eip-controller
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "eip-controller.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "eip-controller.selectorLabels" . | nindent 20 }}
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: controller
+          image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
+          imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+          args:
+            - --leader-elect={{ .Values.leaderElection.enabled }}
+            - --aws-region={{ .Values.aws.region }}
+            - --cluster-name={{ .Values.aws.clusterName }}
+            - --bam-register-url={{ .Values.bam.registerURL }}
+            - --bam-remove-url={{ .Values.bam.removeURL }}
+            - --orphan-interval={{ .Values.controller.orphanInterval }}
+            - --ec2-rate-per-sec={{ .Values.controller.ec2RatePerSec }}
+            - --ec2-burst={{ .Values.controller.ec2Burst }}
+          env:
+            - name: AWS_REGION
+              value: {{ .Values.aws.region | quote }}
+            - name: CLUSTER_NAME
+              value: {{ .Values.aws.clusterName | quote }}
+            - name: BAM_REGISTER_URL
+              value: {{ .Values.bam.registerURL | quote }}
+            - name: BAM_REMOVE_URL
+              value: {{ .Values.bam.removeURL | quote }}
+            {{- if .Values.bam.existingSecret }}
+            - name: BAM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.bam.existingSecret }}
+                  key: api-key
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

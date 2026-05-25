@@ -1,0 +1,26 @@
+EIP Controller {{ .Chart.AppVersion }} deployed successfully to namespace {{ .Release.Namespace }}.
+
+  Controller replicas : {{ .Values.controller.replicas }}
+  AWS region          : {{ .Values.aws.region }}
+  Cluster name        : {{ .Values.aws.clusterName }}
+  Leader election     : {{ .Values.leaderElection.enabled }}
+  Orphan interval     : {{ .Values.controller.orphanInterval }}
+
+Verify the rollout:
+  kubectl rollout status deployment/{{ include "eip-controller.name" . }} -n {{ .Release.Namespace }}
+
+Tail logs:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name=eip-controller -f
+
+Check metrics:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "eip-controller.name" . }} 8080:8080
+  # Then open http://localhost:8080/metrics
+
+Check health:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "eip-controller.name" . }} 8081:8081
+  curl http://localhost:8081/healthz
+
+IMPORTANT: Ensure the following before annotating scraper pods:
+  1. EXTERNALSNAT is enabled: kubectl get ds -n kube-system aws-node -o jsonpath='{...AWS_VPC_K8S_CNI_EXTERNALSNAT...}'
+  2. Scraper nodes are in PUBLIC subnets (have ExternalIP assigned)
+  3. The service account has an IRSA annotation pointing to a role with EC2 EIP permissions

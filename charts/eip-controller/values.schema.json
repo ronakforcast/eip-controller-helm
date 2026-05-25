@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "type": "object",
+  "required": ["aws", "bam"],
+  "properties": {
+    "aws": {
+      "type": "object",
+      "required": ["clusterName", "region"],
+      "properties": {
+        "clusterName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "EKS cluster name — used to scope EIP tags"
+        },
+        "region": {
+          "type": "string",
+          "minLength": 1,
+          "description": "AWS region, e.g. us-east-1"
+        }
+      }
+    },
+    "bam": {
+      "type": "object",
+      "required": ["registerURL", "removeURL"],
+      "properties": {
+        "registerURL": {
+          "type": "string",
+          "minLength": 1,
+          "description": "IP registry register endpoint"
+        },
+        "removeURL": {
+          "type": "string",
+          "minLength": 1,
+          "description": "IP registry remove endpoint"
+        },
+        "existingSecret": {
+          "type": "string",
+          "description": "Name of a Kubernetes Secret containing key 'api-key'"
+        }
+      }
+    },
+    "controller": {
+      "type": "object",
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "ec2RatePerSec": {
+          "type": "string"
+        },
+        "ec2Burst": {
+          "type": "string"
+        },
+        "orphanInterval": {
+          "type": "string"
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "type": "object" }
+      }
+    },
+    "leaderElection": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    }
+  }
+}

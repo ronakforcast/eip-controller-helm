@@ -1,0 +1,143 @@
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "eip-controller.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "eip-controller.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: eip-controller.rules
+      rules:
+
+        # Fires when an eip-managed pod has been Running for more than 60 seconds
+        # without receiving its public IP annotation. Catches slowness and stalls,
+        # not just hard failures. Escalates to critical after 5 minutes.
+        - alert: PodWaitingForEIP
+          expr: |
+            (
+              time() - kube_pod_start_time{pod=~".+"}
+            ) > 60
+            and on(pod, namespace)
+              kube_pod_annotations{annotation_eip_controller_io_eip_managed="true"}
+            unless on(pod, namespace)
+              kube_pod_annotations{annotation_eip_controller_io_eip_public_ip=~".+"}
+            and on(pod, namespace)
+              kube_pod_status_phase{phase="Running"}
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} waiting for EIP"
+            description: >
+              Pod {{ $labels.namespace }}/{{ $labels.pod }} has been Running for
+              {{ $value | humanizeDuration }} without an EIP assignment.
+              Check controller logs and reconcile queue depth.
+            runbook_url: "https://github.com/your-org/eip-controller/docs/runbooks/pod-waiting-for-eip.md"
+
+        - alert: PodWaitingForEIPCritical
+          expr: |
+            (
+              time() - kube_pod_start_time{pod=~".+"}
+            ) > 300
+            and on(pod, namespace)
+              kube_pod_annotations{annotation_eip_controller_io_eip_managed="true"}
+            unless on(pod, namespace)
+              kube_pod_annotations{annotation_eip_controller_io_eip_public_ip=~".+"}
+            and on(pod, namespace)
+              kube_pod_status_phase{phase="Running"}
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} still waiting for EIP after 5 min"
+            description: >
+              Pod {{ $labels.namespace }}/{{ $labels.pod }} has been Running for
+              {{ $value | humanizeDuration }} without an EIP. Controller may be
+              stuck, rate-limited, or have a permissions problem.
+            runbook_url: "https://github.com/your-org/eip-controller/docs/runbooks/pod-waiting-for-eip.md"
+
+        # EIP allocation error rate exceeds 5% over a 5-minute window.
+        - alert: EIPAllocationErrorRate
+          expr: |
+            rate(eip_controller_allocations_total{status="error"}[5m])
+            /
+            rate(eip_controller_allocations_total[5m])
+            > 0.05
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "EIP allocation error rate above 5%"
+            description: >
+              {{ $value | humanizePercentage }} of EIP allocation attempts are
+              failing for group {{ $labels.group }}.
+              Check controller logs for AWS API errors.
+
+        # Orphaned EIPs — allocated but no matching live pod — detected for 15+ minutes.
+        # Any orphan over 15 minutes indicates the orphan reconciler is not running or is failing.
+        - alert: OrphanEIPsDetected
+          expr: eip_controller_orphan_count > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $value }} orphaned EIP(s) detected"
+            description: >
+              {{ $value }} EIP(s) are allocated but have no matching live pod.
+              The orphan reconciler should clean these within 10 minutes.
+              If this persists, check that DescribeAddresses is returning results
+              and the Kubernetes pod list is accessible.
+
+        - alert: OrphanEIPsCritical
+          expr: eip_controller_orphan_count > 10
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $value }} orphaned EIPs — possible systematic leak"
+            description: >
+              {{ $value }} EIPs are orphaned. This volume suggests a systematic
+              controller failure. Each orphaned EIP costs $0.005/hour while uncleaned.
+
+        # No controller replica holds the leader lease for more than 2 minutes.
+        # With leader election on, exactly one replica should always be leader.
+        - alert: EIPControllerNoLeader
+          expr: sum(eip_controller_is_leader) == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "EIP controller has no leader"
+            description: >
+              No controller replica is currently the leader. EIP allocations and
+              releases are not being processed. Check pod status in the controller
+              namespace.
+
+        # BAM API failure rate exceeds 20% over 5 minutes.
+        # BAM failures are non-blocking but sustained failures mean IP registry
+        # is out of sync with actual EIP state.
+        - alert: BAMHighFailureRate
+          expr: |
+            (
+              rate(eip_controller_bam_register_failures_total[5m])
+              +
+              rate(eip_controller_bam_remove_failures_total[5m])
+            )
+            /
+            rate(eip_controller_bam_calls_total[5m])
+            > 0.20
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "BAM API failure rate above 20%"
+            description: >
+              More than 20% of BAM API calls are failing. The IP registry may be
+              out of sync with actual EIP assignments. Check BAM service health.
+              EIP allocation itself is unaffected — scrapers are still getting IPs.
+{{- end }}
