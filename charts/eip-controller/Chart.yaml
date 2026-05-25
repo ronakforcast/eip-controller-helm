@@ -2,7 +2,7 @@ apiVersion: v2
 name: eip-controller
 description: Per-pod Elastic IP lifecycle controller for EKS scraper workloads
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "0.1.0"
 keywords:
   - kubernetes
@@ -21,3 +21,5 @@ annotations:
   artifacthub.io/changes: |
     - kind: added
       description: Initial release
+    - kind: changed
+      description: Set image to ghcr.io/ronakforcast/eip-controller:0.1.0
