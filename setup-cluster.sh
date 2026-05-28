@@ -335,56 +335,32 @@ pause
 # ─── Step 6: IAM role ─────────────────────────────────────────────────────────
 header "Step 6 — IAM role"
 
-ROLE_ARN=$(aws iam get-role --role-name "$IAM_ROLE" \
-  --query 'Role.Arn' --output text 2>/dev/null || echo "")
+POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${IAM_POLICY}"
 
-if [ -n "$ROLE_ARN" ]; then
-  pass "IAM role exists: $ROLE_ARN"
-  # verify it has the policy attached
-  POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${IAM_POLICY}"
-  ATTACHED=$(aws iam list-attached-role-policies --role-name "$IAM_ROLE" \
-    --query "AttachedPolicies[?PolicyArn=='$POLICY_ARN'].PolicyArn" \
-    --output text 2>/dev/null)
-  if [ -n "$ATTACHED" ]; then
-    pass "Policy $IAM_POLICY is attached ✔"
-  else
-    warn "Policy $IAM_POLICY is NOT attached to $IAM_ROLE"
-    if confirm "Attach $IAM_POLICY to $IAM_ROLE now?"; then
-      aws iam attach-role-policy \
-        --role-name "$IAM_ROLE" \
-        --policy-arn "$POLICY_ARN"
-      pass "Policy attached"
-    fi
-  fi
-else
-  warn "IAM role '$IAM_ROLE' does not exist"
-  if confirm "Create IAM policy and role now?"; then
-    # create policy
-    POLICY_ARN=$(aws iam create-policy \
-      --policy-name "$IAM_POLICY" \
-      --policy-document '{
-        "Version": "2012-10-17",
-        "Statement": [{
-          "Effect": "Allow",
-          "Action": [
-            "ec2:AllocateAddress",
-            "ec2:AssociateAddress",
-            "ec2:DisassociateAddress",
-            "ec2:ReleaseAddress",
-            "ec2:DescribeAddresses",
-            "ec2:DescribeNetworkInterfaces",
-            "ec2:DescribeInstances",
-            "ec2:CreateTags"
-          ],
-          "Resource": "*"
-        }]
-      }' \
-      --query 'Policy.Arn' --output text 2>/dev/null || \
-      echo "arn:aws:iam::${ACCOUNT_ID}:policy/${IAM_POLICY}")
-    pass "Policy created: $POLICY_ARN"
+REQUIRED_ACTIONS="ec2:AllocateAddress ec2:AssociateAddress ec2:DisassociateAddress ec2:ReleaseAddress ec2:DescribeAddresses ec2:DescribeNetworkInterfaces ec2:DescribeInstances ec2:CreateTags"
 
-    # create trust policy
-    TRUST_POLICY=$(cat <<TRUST
+DESIRED_POLICY_DOC=$(cat <<PDOC
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "ec2:AllocateAddress",
+      "ec2:AssociateAddress",
+      "ec2:DisassociateAddress",
+      "ec2:ReleaseAddress",
+      "ec2:DescribeAddresses",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:DescribeInstances",
+      "ec2:CreateTags"
+    ],
+    "Resource": "*"
+  }]
+}
+PDOC
+)
+
+DESIRED_TRUST=$(cat <<TRUST
 {
   "Version": "2012-10-17",
   "Statement": [{
@@ -403,9 +379,135 @@ else
 }
 TRUST
 )
+
+ROLE_ARN=$(aws iam get-role --role-name "$IAM_ROLE" \
+  --query 'Role.Arn' --output text 2>/dev/null || echo "")
+
+if [ -n "$ROLE_ARN" ]; then
+  pass "IAM role exists: $ROLE_ARN"
+
+  # ── check trust policy has correct OIDC ID ──────────────────────────────────
+  CURRENT_TRUST=$(aws iam get-role --role-name "$IAM_ROLE" \
+    --query 'Role.AssumeRolePolicyDocument' --output json 2>/dev/null || echo "{}")
+
+  if echo "$CURRENT_TRUST" | grep -q "$OIDC_ID"; then
+    pass "Trust policy references correct OIDC ID ($OIDC_ID) ✔"
+  else
+    warn "Trust policy does NOT reference this cluster's OIDC ID ($OIDC_ID)"
+    info "Current trust policy:"
+    echo "$CURRENT_TRUST" | python3 -m json.tool 2>/dev/null || echo "$CURRENT_TRUST"
+    if confirm "Update trust policy to use OIDC ID $OIDC_ID?"; then
+      aws iam update-assume-role-policy \
+        --role-name "$IAM_ROLE" \
+        --policy-document "$DESIRED_TRUST"
+      pass "Trust policy updated with OIDC ID $OIDC_ID"
+    else
+      warn "Skipping — IRSA will fail if trust policy points to a different cluster"
+    fi
+  fi
+
+  # ── check service account condition ─────────────────────────────────────────
+  if echo "$CURRENT_TRUST" | grep -q "system:serviceaccount:eip-controller:eip-controller"; then
+    pass "Trust policy scoped to correct service account ✔"
+  else
+    warn "Trust policy does not scope to system:serviceaccount:eip-controller:eip-controller"
+    if confirm "Update trust policy with correct service account condition?"; then
+      aws iam update-assume-role-policy \
+        --role-name "$IAM_ROLE" \
+        --policy-document "$DESIRED_TRUST"
+      pass "Trust policy updated"
+    fi
+  fi
+
+  # ── check policy exists and has all required permissions ────────────────────
+  POLICY_EXISTS=$(aws iam get-policy --policy-arn "$POLICY_ARN" \
+    --query 'Policy.Arn' --output text 2>/dev/null || echo "")
+
+  if [ -z "$POLICY_EXISTS" ]; then
+    warn "Policy $IAM_POLICY does not exist — creating it"
+    aws iam create-policy \
+      --policy-name "$IAM_POLICY" \
+      --policy-document "$DESIRED_POLICY_DOC" > /dev/null
+    pass "Policy $IAM_POLICY created"
+  else
+    # get current policy version and check permissions
+    DEFAULT_VERSION=$(aws iam get-policy --policy-arn "$POLICY_ARN" \
+      --query 'Policy.DefaultVersionId' --output text 2>/dev/null)
+    CURRENT_ACTIONS=$(aws iam get-policy-version \
+      --policy-arn "$POLICY_ARN" \
+      --version-id "$DEFAULT_VERSION" \
+      --query 'PolicyVersion.Document.Statement[0].Action' \
+      --output text 2>/dev/null || echo "")
+
+    MISSING=""
+    for action in $REQUIRED_ACTIONS; do
+      if ! echo "$CURRENT_ACTIONS" | grep -q "$action"; then
+        MISSING="$MISSING $action"
+      fi
+    done
+
+    if [ -z "$MISSING" ]; then
+      pass "Policy $IAM_POLICY has all required permissions ✔"
+    else
+      warn "Policy $IAM_POLICY is missing:$MISSING"
+      if confirm "Update policy to add missing permissions?"; then
+        # delete old versions if at limit (max 5)
+        VERSION_COUNT=$(aws iam list-policy-versions --policy-arn "$POLICY_ARN" \
+          --query 'length(Versions)' --output text 2>/dev/null || echo "0")
+        if [ "$VERSION_COUNT" -ge 5 ]; then
+          OLDEST=$(aws iam list-policy-versions --policy-arn "$POLICY_ARN" \
+            --query 'Versions[-1].VersionId' --output text 2>/dev/null)
+          aws iam delete-policy-version \
+            --policy-arn "$POLICY_ARN" \
+            --version-id "$OLDEST" 2>/dev/null || true
+          info "Deleted oldest policy version $OLDEST to make room"
+        fi
+        aws iam create-policy-version \
+          --policy-arn "$POLICY_ARN" \
+          --policy-document "$DESIRED_POLICY_DOC" \
+          --set-as-default > /dev/null
+        pass "Policy $IAM_POLICY updated with all required permissions"
+      else
+        warn "Skipping — controller may fail with missing permissions"
+      fi
+    fi
+  fi
+
+  # ── check policy is attached to role ────────────────────────────────────────
+  ATTACHED=$(aws iam list-attached-role-policies --role-name "$IAM_ROLE" \
+    --query "AttachedPolicies[?PolicyArn=='$POLICY_ARN'].PolicyArn" \
+    --output text 2>/dev/null)
+  if [ -n "$ATTACHED" ]; then
+    pass "Policy $IAM_POLICY is attached to role ✔"
+  else
+    warn "Policy $IAM_POLICY is NOT attached to $IAM_ROLE"
+    if confirm "Attach policy to role now?"; then
+      aws iam attach-role-policy \
+        --role-name "$IAM_ROLE" \
+        --policy-arn "$POLICY_ARN"
+      pass "Policy attached"
+    fi
+  fi
+
+else
+  # ── role does not exist — create everything ──────────────────────────────────
+  warn "IAM role '$IAM_ROLE' does not exist"
+  if confirm "Create IAM policy and role now?"; then
+    # create or reuse policy
+    POLICY_EXISTS=$(aws iam get-policy --policy-arn "$POLICY_ARN" \
+      --query 'Policy.Arn' --output text 2>/dev/null || echo "")
+    if [ -z "$POLICY_EXISTS" ]; then
+      aws iam create-policy \
+        --policy-name "$IAM_POLICY" \
+        --policy-document "$DESIRED_POLICY_DOC" > /dev/null
+      pass "Policy $IAM_POLICY created"
+    else
+      pass "Policy $IAM_POLICY already exists — reusing"
+    fi
+
     ROLE_ARN=$(aws iam create-role \
       --role-name "$IAM_ROLE" \
-      --assume-role-policy-document "$TRUST_POLICY" \
+      --assume-role-policy-document "$DESIRED_TRUST" \
       --query 'Role.Arn' --output text)
     pass "Role created: $ROLE_ARN"
 
