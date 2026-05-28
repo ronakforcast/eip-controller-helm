@@ -32,10 +32,10 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} waiting for EIP"
+            summary: "Pod {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} waiting for EIP"
             description: >
-              Pod {{ $labels.namespace }}/{{ $labels.pod }} has been Running for
-              {{ $value | humanizeDuration }} without an EIP assignment.
+              Pod {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} has been Running for
+              {{ "{{" }} $value | humanizeDuration {{ "}}" }} without an EIP assignment.
               Check controller logs and reconcile queue depth.
             runbook_url: "https://github.com/your-org/eip-controller/docs/runbooks/pod-waiting-for-eip.md"
 
@@ -54,10 +54,10 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} still waiting for EIP after 5 min"
+            summary: "Pod {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} still waiting for EIP after 5 min"
             description: >
-              Pod {{ $labels.namespace }}/{{ $labels.pod }} has been Running for
-              {{ $value | humanizeDuration }} without an EIP. Controller may be
+              Pod {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} has been Running for
+              {{ "{{" }} $value | humanizeDuration {{ "}}" }} without an EIP. Controller may be
               stuck, rate-limited, or have a permissions problem.
             runbook_url: "https://github.com/your-org/eip-controller/docs/runbooks/pod-waiting-for-eip.md"
 
@@ -74,8 +74,8 @@ spec:
           annotations:
             summary: "EIP allocation error rate above 5%"
             description: >
-              {{ $value | humanizePercentage }} of EIP allocation attempts are
-              failing for group {{ $labels.group }}.
+              {{ "{{" }} $value | humanizePercentage {{ "}}" }} of EIP allocation attempts are
+              failing for group {{ "{{" }} $labels.group {{ "}}" }}.
               Check controller logs for AWS API errors.
 
         # Orphaned EIPs — allocated but no matching live pod — detected for 15+ minutes.
@@ -86,9 +86,9 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "{{ $value }} orphaned EIP(s) detected"
+            summary: "{{ "{{" }} $value {{ "}}" }} orphaned EIP(s) detected"
             description: >
-              {{ $value }} EIP(s) are allocated but have no matching live pod.
+              {{ "{{" }} $value {{ "}}" }} EIP(s) are allocated but have no matching live pod.
               The orphan reconciler should clean these within 10 minutes.
               If this persists, check that DescribeAddresses is returning results
               and the Kubernetes pod list is accessible.
@@ -99,9 +99,9 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "{{ $value }} orphaned EIPs — possible systematic leak"
+            summary: "{{ "{{" }} $value {{ "}}" }} orphaned EIPs — possible systematic leak"
             description: >
-              {{ $value }} EIPs are orphaned. This volume suggests a systematic
+              {{ "{{" }} $value {{ "}}" }} EIPs are orphaned. This volume suggests a systematic
               controller failure. Each orphaned EIP costs $0.005/hour while uncleaned.
 
         # No controller replica holds the leader lease for more than 2 minutes.
