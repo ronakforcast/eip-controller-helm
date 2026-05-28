@@ -5,57 +5,25 @@ Helm chart for deploying the EIP Controller — a Kubernetes operator that assig
 ## Architecture
 
 ```mermaid
-flowchart TB
+flowchart TD
     subgraph EKS["EKS Cluster"]
-        subgraph CTRL_NS["Namespace · eip-controller"]
-            direction LR
-            CA["Controller Pod\n(active leader)"]
-            CS["Controller Pod\n(standby)"]
-            LL[("Leader\nLease")]
-            CA -- holds --> LL
-            CS -. watches .-> LL
-        end
-
-        subgraph SCRAPER_NS["Namespace · scrapers  (scales to N pods)"]
-            P1["Scraper Pod 1\nEIP: 3.66.x.x"]
-            P2["Scraper Pod 2\nEIP: 18.194.x.x"]
-            PN["Scraper Pod N\nEIP: 63.180.x.x"]
-        end
-
-        AWSN["aws-node DaemonSet\nEXTERNALSNAT=true"]
+        CTRL["EIP Controller\nsystem node · private subnet"]
+        PODS["Scraper Pods\nscraper node · public subnet\neach annotated  eip-managed=true"]
     end
 
-    subgraph AWS["AWS Account"]
-        IRSA["IAM Role\nvia IRSA"]
-        EC2["EC2 API"]
-
-        subgraph EIPS["Elastic IPs  (1 per pod)"]
-            E1["3.66.x.x"]
-            E2["18.194.x.x"]
-            EN["63.180.x.x"]
-        end
-
-        ENI1["ENI · Node 1"]
-        ENI2["ENI · Node 2"]
-        IGW["Internet Gateway"]
-    end
-
-    BAM["IP Registry\nBAM Service"]
+    EC2["AWS EC2 API\n(credentials via IRSA)"]
+    EIP["Elastic IP\n1 allocated per pod"]
+    IGW["Internet Gateway"]
     WEB["Target Websites"]
+    BAM["BAM IP Registry"]
 
-    CA -- "1  watch pods with\neip-managed=true annotation" --> SCRAPER_NS
-    CA -- "2  AllocateAddress\nAssociateAddress\nReleaseAddress\nDescribeAddresses" --> EC2
-    CA -- "AssumeRoleWithWebIdentity" --> IRSA
-    IRSA --> EC2
-    EC2 --> EIPS
-    E1 -- "associated to\npod private IP" --> ENI1
-    E2 & EN -- "associated to\npod private IP" --> ENI2
-    AWSN -. "assigns secondary\nIPs to pods" .-> ENI1 & ENI2
-    P1 --> ENI1
-    P2 & PN --> ENI2
-    ENI1 & ENI2 -- "egress via\nassigned EIP" --> IGW
+    CTRL -->|"① watch pods"| PODS
+    CTRL -->|"② AllocateAddress + AssociateAddress"| EC2
+    EC2 -->|"③ EIP assigned to pod ENI"| EIP
+    EIP -->|"④ IP written back as pod annotation"| PODS
+    PODS -->|"⑤ all traffic exits via own EIP"| IGW
     IGW --> WEB
-    CA -- "3  register / remove\nbest-effort, non-blocking" --> BAM
+    CTRL -.->|"⑥ register / remove  (non-blocking)"| BAM
 ```
 
 **Key design points at scale:**
