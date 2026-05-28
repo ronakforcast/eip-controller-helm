@@ -90,10 +90,35 @@ helm install eip-controller eip-controller/eip-controller \
 
 | Requirement | Details |
 |-------------|---------|
-| EKS cluster | VPC CNI with `EXTERNALSNAT=true` on scraper node groups |
-| Public subnets | Scraper nodes must have an IGW route (not NAT Gateway) |
-| IRSA role | IAM role with EC2 EIP permissions attached to the controller service account |
+| EKS cluster | VPC CNI with `EXTERNALSNAT=true` on the aws-node DaemonSet |
+| Two node groups | **Scraper nodes** in public subnets (IGW route, labeled `node.kubernetes.io/scraper=true`); **system nodes** in private subnets (NAT Gateway route) for the controller |
+| IRSA role | IAM role attached to the controller service account — see required permissions below |
 | EIP quota | Default AWS quota is 5 per region — request an increase before deploying at scale |
+| IMDSv2 hop limit | Set to `2` on all nodes (default is `1`, which blocks pod-level IMDS access) |
+
+### Required IAM permissions
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "ec2:AllocateAddress",
+      "ec2:AssociateAddress",
+      "ec2:DisassociateAddress",
+      "ec2:ReleaseAddress",
+      "ec2:DescribeAddresses",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:DescribeInstances",
+      "ec2:CreateTags"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+> `ec2:CreateTags` is required — the controller tags every allocated EIP with the cluster name and pod identity for scoped cleanup.
 
 ## Key values
 
