@@ -226,10 +226,45 @@ done
 
 echo ""
 info "Checking cluster connectivity..."
+CLUSTER_OK=false
 if kc cluster-info 2>/dev/null | grep -q "running"; then
   ok "Cluster reachable via context: ${KUBE_CTX}"
+  CLUSTER_OK=true
 else
-  fail "Cannot reach cluster. Check your kubeconfig and context."
+  fail "Cannot reach cluster with context: ${KUBE_CTX}"
+  echo ""
+  echo -e "  ${YELLOW}Fix this now? The script cannot continue until the cluster is reachable.${NC}"
+  echo -e "  ${DIM}  y  — run 'aws eks update-kubeconfig' to fetch credentials (most common fix)${NC}"
+  echo -e "  ${DIM}  n  — skip and continue anyway (later stages will fail)${NC}"
+  read -r -p "  > " DO_KUBECONFIG
+  if [[ "$(echo "$DO_KUBECONFIG" | tr '[:upper:]' '[:lower:]')" == "y" ]]; then
+    echo ""
+    echo -e "  ${DIM}Enter your EKS cluster name (leave blank to use '${CLUSTER_NAME}'):${NC}"
+    read -r -p "  > " EKS_NAME_INPUT
+    EKS_NAME="${EKS_NAME_INPUT:-$CLUSTER_NAME}"
+    echo ""
+    info "Running: aws eks update-kubeconfig --name ${EKS_NAME} --region ${AWS_REGION}"
+    if aws eks update-kubeconfig --name "${EKS_NAME}" --region "${AWS_REGION}" 2>/dev/null; then
+      ok "kubeconfig updated"
+      # Update context to the one just added
+      KUBE_CTX=$(kubectl config current-context 2>/dev/null || echo "$KUBE_CTX")
+      info "New context: ${KUBE_CTX}"
+      echo ""
+      info "Re-checking cluster connectivity..."
+      if kc cluster-info 2>/dev/null | grep -q "running"; then
+        ok "Cluster is now reachable"
+        CLUSTER_OK=true
+      else
+        fail "Still cannot reach cluster after kubeconfig update — check VPN/network access"
+        warn "The remaining cluster checks will be skipped. Fix connectivity and re-run."
+      fi
+    else
+      fail "aws eks update-kubeconfig failed — check that the cluster name and region are correct"
+      warn "Try manually: aws eks update-kubeconfig --name <cluster-name> --region ${AWS_REGION}"
+    fi
+  else
+    warn "Skipped. All kubectl steps in later stages will fail until cluster is reachable."
+  fi
 fi
 
 echo ""
@@ -239,7 +274,13 @@ if [[ -n "$CALLER" ]]; then
   ok "AWS identity: ${CALLER}"
 else
   fail "AWS credentials not working for region ${AWS_REGION}"
+  warn "Run 'aws configure' or set AWS_PROFILE / AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY"
 fi
+
+if [[ "$CLUSTER_OK" == "false" ]]; then
+  skip "Scraper node label check — skipped (cluster not reachable)"
+  skip "EXTERNALSNAT check — skipped (cluster not reachable)"
+else
 
 echo ""
 info "Checking for scraper node group (node.kubernetes.io/scraper=true label)..."
@@ -343,6 +384,8 @@ else
     warn "Skipped. Egress IP test (Stage 4) will fail until EXTERNALSNAT=true is set."
   fi
 fi
+
+fi  # end cluster_ok block
 
 echo ""
 info "Checking current EIP quota usage in ${AWS_REGION}..."
