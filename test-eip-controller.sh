@@ -70,7 +70,7 @@ approve() {
   divider
   echo -e "  ${YELLOW}${BOLD}Press [Enter] to continue to the next stage, or type 'q' to quit.${NC}"
   read -r -p "  > " INPUT
-  if [[ "${INPUT,,}" == "q" ]]; then
+  if [[ "$(echo "$INPUT" | tr '[:upper:]' '[:lower:]')" == "q" ]]; then
     echo ""
     echo -e "${YELLOW}Exiting at user request.${NC}"
     cleanup_and_summary
@@ -105,7 +105,7 @@ cleanup_and_summary() {
   # Offer cleanup
   echo -e "  ${YELLOW}Clean up test resources? (kubectl delete namespace ${TEST_NS}) [y/N]${NC}"
   read -r -p "  > " DO_CLEAN
-  if [[ "${DO_CLEAN,,}" == "y" ]]; then
+  if [[ "$(echo "$DO_CLEAN" | tr '[:upper:]' '[:lower:]')" == "y" ]]; then
     echo ""
     info "Deleting namespace ${TEST_NS} ..."
     kc delete namespace "${TEST_NS}" --ignore-not-found 2>/dev/null && \
@@ -202,7 +202,7 @@ echo -e "  ${DIM}BAM remove      : ${BAM_REMOVE_URL:-<skipped>}${NC}"
 echo ""
 echo -e "  ${YELLOW}Proceed with these settings? [y/N]${NC}"
 read -r -p "  > " CONFIRM
-if [[ "${CONFIRM,,}" != "y" ]]; then
+if [[ "$(echo "$CONFIRM" | tr '[:upper:]' '[:lower:]')" != "y" ]]; then
   echo "Exiting. Re-run the script to try again."
   exit 0
 fi
