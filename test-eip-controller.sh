@@ -250,8 +250,68 @@ if [[ "$SCRAPER_NODES" -gt 0 ]]; then
     awk '{printf "     %s  (%s)\n", $1, $2}'
 else
   fail "No nodes with label node.kubernetes.io/scraper=true"
-  warn "Add the label to your scraper node group:"
-  warn "  kubectl label node <node-name> node.kubernetes.io/scraper=true"
+  echo ""
+  echo -e "  ${YELLOW}All nodes in the cluster:${NC}"
+  kc get nodes --no-headers 2>/dev/null | awk '{printf "    [%d]  %-45s  %s\n", NR, $1, $2}'
+  echo ""
+  NODE_LIST=$(kc get nodes --no-headers -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null)
+  NODE_COUNT=$(echo "$NODE_LIST" | grep -c . || true)
+  echo -e "  ${YELLOW}Auto-label nodes now? Options:${NC}"
+  echo -e "  ${DIM}  a  — label ALL ${NODE_COUNT} nodes (use if all nodes are scraper nodes)${NC}"
+  echo -e "  ${DIM}  s  — select specific nodes by number (comma-separated, e.g. 1,3)${NC}"
+  echo -e "  ${DIM}  n  — skip (label manually later)${NC}"
+  read -r -p "  > " LABEL_CHOICE
+  LABEL_CHOICE=$(echo "$LABEL_CHOICE" | tr '[:upper:]' '[:lower:]')
+  echo ""
+  if [[ "$LABEL_CHOICE" == "a" ]]; then
+    while IFS= read -r node; do
+      kc label node "$node" node.kubernetes.io/scraper=true --overwrite 2>/dev/null && \
+        ok "Labelled: $node" || fail "Failed to label: $node"
+    done <<< "$NODE_LIST"
+    echo ""
+    echo -e "  ${YELLOW}Also add the NoSchedule taint so only scraper pods land here? [y/N]${NC}"
+    read -r -p "  > " DO_TAINT
+    if [[ "$(echo "$DO_TAINT" | tr '[:upper:]' '[:lower:]')" == "y" ]]; then
+      while IFS= read -r node; do
+        kc taint node "$node" node.kubernetes.io/scraper=true:NoSchedule --overwrite 2>/dev/null && \
+          ok "Tainted: $node" || fail "Failed to taint: $node"
+      done <<< "$NODE_LIST"
+    fi
+    SCRAPER_NODES=$(kc get nodes -l "node.kubernetes.io/scraper=true" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    ok "${SCRAPER_NODES} node(s) now labelled"
+  elif [[ "$LABEL_CHOICE" == "s" ]]; then
+    echo -e "  ${DIM}Enter node numbers to label (comma-separated, e.g. 1,3):${NC}"
+    read -r -p "  > " NODE_NUMS
+    IFS=',' read -ra SELECTED <<< "$NODE_NUMS"
+    for num in "${SELECTED[@]}"; do
+      num=$(echo "$num" | tr -d ' ')
+      node=$(echo "$NODE_LIST" | sed -n "${num}p")
+      if [[ -n "$node" ]]; then
+        kc label node "$node" node.kubernetes.io/scraper=true --overwrite 2>/dev/null && \
+          ok "Labelled: $node" || fail "Failed to label: $node"
+      else
+        warn "No node at index ${num}"
+      fi
+    done
+    echo ""
+    echo -e "  ${YELLOW}Also add NoSchedule taint to these nodes? [y/N]${NC}"
+    read -r -p "  > " DO_TAINT
+    if [[ "$(echo "$DO_TAINT" | tr '[:upper:]' '[:lower:]')" == "y" ]]; then
+      for num in "${SELECTED[@]}"; do
+        num=$(echo "$num" | tr -d ' ')
+        node=$(echo "$NODE_LIST" | sed -n "${num}p")
+        if [[ -n "$node" ]]; then
+          kc taint node "$node" node.kubernetes.io/scraper=true:NoSchedule --overwrite 2>/dev/null && \
+            ok "Tainted: $node" || fail "Failed to taint: $node"
+        fi
+      done
+    fi
+    SCRAPER_NODES=$(kc get nodes -l "node.kubernetes.io/scraper=true" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    ok "${SCRAPER_NODES} node(s) now labelled"
+  else
+    warn "Skipped. Label manually before running Stage 3:"
+    warn "  kubectl label node <node-name> node.kubernetes.io/scraper=true"
+  fi
 fi
 
 echo ""
@@ -263,7 +323,25 @@ if [[ "$SNAT" == "true" ]]; then
 else
   fail "EXTERNALSNAT is not set to 'true' on aws-node (got: '${SNAT:-not set}')"
   warn "Without this, pod egress will go through the node's IP, not the EIP."
-  warn "Fix: kubectl set env daemonset/aws-node -n kube-system AWS_VPC_K8S_CNI_EXTERNALSNAT=true"
+  echo ""
+  echo -e "  ${YELLOW}Patch aws-node DaemonSet now to set EXTERNALSNAT=true? [y/N]${NC}"
+  echo -e "  ${DIM}  This will cause aws-node pods to restart one at a time (rolling update).${NC}"
+  echo -e "  ${DIM}  It is safe to do on a running cluster but will briefly interrupt pod networking per node.${NC}"
+  read -r -p "  > " DO_SNAT
+  if [[ "$(echo "$DO_SNAT" | tr '[:upper:]' '[:lower:]')" == "y" ]]; then
+    echo ""
+    info "Patching aws-node DaemonSet..."
+    kc set env daemonset/aws-node -n kube-system AWS_VPC_K8S_CNI_EXTERNALSNAT=true 2>/dev/null && \
+      ok "Patch applied — aws-node pods are rolling out" || \
+      fail "Patch failed — try manually: kubectl set env daemonset/aws-node -n kube-system AWS_VPC_K8S_CNI_EXTERNALSNAT=true"
+    echo ""
+    info "Waiting for aws-node rollout to complete (up to 3 minutes)..."
+    kc rollout status daemonset/aws-node -n kube-system --timeout=180s 2>/dev/null && \
+      ok "aws-node rollout complete — EXTERNALSNAT=true is active" || \
+      warn "Rollout timed out — it may still be progressing. Check: kubectl rollout status daemonset/aws-node -n kube-system"
+  else
+    warn "Skipped. Egress IP test (Stage 4) will fail until EXTERNALSNAT=true is set."
+  fi
 fi
 
 echo ""
