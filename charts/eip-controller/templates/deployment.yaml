@@ -31,6 +31,14 @@ spec:
                   matchLabels:
                     {{- include "eip-controller.selectorLabels" . | nindent 20 }}
                 topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node.kubernetes.io/scraper
+                    operator: NotIn
+                    values:
+                      - "true"
       containers:
         - name: controller
           image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
