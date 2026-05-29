@@ -10,7 +10,36 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-05-28T20:50:26.207549+05:30"
+    created: "2026-05-29T12:10:06.583256+05:30"
+    description: Per-pod Elastic IP lifecycle controller for EKS scraper workloads
+    digest: eb1dab18c335aab24dce4c490268be9a3168b61d62ed285367ea050f5344859d
+    home: https://github.com/ronakforcast/eip-controller-helm
+    keywords:
+    - kubernetes
+    - aws
+    - eip
+    - controller
+    - networking
+    - eks
+    maintainers:
+    - name: ronakforcast
+    name: eip-controller
+    sources:
+    - https://github.com/ronakforcast/eip-controller-helm
+    type: application
+    urls:
+    - https://ronakforcast.github.io/eip-controller-helm/eip-controller-0.1.5.tgz
+    version: 0.1.5
+  - annotations:
+      artifacthub.io/changes: |
+        - kind: added
+          description: Initial release
+        - kind: changed
+          description: Set image to ghcr.io/ronakforcast/eip-controller:0.1.0
+      artifacthub.io/license: Apache-2.0
+    apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-05-29T12:10:06.582819+05:30"
     description: Per-pod Elastic IP lifecycle controller for EKS scraper workloads
     digest: b61162feb429ca49f341d1886492307c89cdb3fba43f453c9305548e9edc68cb
     home: https://github.com/ronakforcast/eip-controller-helm
@@ -39,7 +68,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-05-28T20:50:26.207175+05:30"
+    created: "2026-05-29T12:10:06.582601+05:30"
     description: Per-pod Elastic IP lifecycle controller for EKS scraper workloads
     digest: 08d6a4ab9667e5824e22ae8d9e990b4d1d53bf8bd54157d69f92fae333203b00
     home: https://github.com/ronakforcast/eip-controller-helm
@@ -68,7 +97,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-05-28T20:50:26.206945+05:30"
+    created: "2026-05-29T12:10:06.582377+05:30"
     description: Per-pod Elastic IP lifecycle controller for EKS scraper workloads
     digest: 49262d6840fe8271eb4ce88eae6c34364208fa669b3c8dc169c00ea28955c511
     home: https://github.com/ronakforcast/eip-controller-helm
@@ -97,7 +126,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-05-28T20:50:26.206698+05:30"
+    created: "2026-05-29T12:10:06.582138+05:30"
     description: Per-pod Elastic IP lifecycle controller for EKS scraper workloads
     digest: 829f501ce91d3f9eb89069e4012ac2582f9b5286b63631ed47ee252b38ebd3b2
     home: https://github.com/ronakforcast/eip-controller-helm
@@ -124,7 +153,7 @@ entries:
       artifacthub.io/license: Apache-2.0
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-05-28T20:50:26.206415+05:30"
+    created: "2026-05-29T12:10:06.581869+05:30"
     description: Per-pod Elastic IP lifecycle controller for EKS scraper workloads
     digest: 347e7340b18dbeb5b2911a5d44ef2c47f44cd8c33552f4f9193783d273e69928
     home: https://github.com/ronakforcast/eip-controller-helm
@@ -144,4 +173,4 @@ entries:
     urls:
     - https://ronakforcast.github.io/eip-controller-helm/eip-controller-0.1.0.tgz
     version: 0.1.0
-generated: "2026-05-28T20:50:26.205677+05:30"
+generated: "2026-05-29T12:10:06.581282+05:30"
