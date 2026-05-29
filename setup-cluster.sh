@@ -676,7 +676,11 @@ if step_header "Step 8 — Helm install"; then
       echo "      --set serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=$ROLE_ARN"
       echo ""
       if confirm "Install now?"; then
-        helm repo update eip-controller 2>/dev/null || true
+        if ! helm repo list 2>/dev/null | grep -q "eip-controller"; then
+          info "Adding eip-controller Helm repo..."
+          helm repo add eip-controller https://ronakforcast.github.io/eip-controller-helm
+        fi
+        helm repo update eip-controller
         helm install eip-controller eip-controller/eip-controller \
           --namespace eip-controller --create-namespace \
           --set aws.region="$REGION" \
