@@ -673,7 +673,7 @@ if step_header "Step 8 — Helm install"; then
       echo "      --set aws.clusterName=$CLUSTER_NAME \\"
       echo "      --set bam.registerURL=$BAM_REGISTER \\"
       echo "      --set bam.removeURL=$BAM_REMOVE \\"
-      echo "      --set serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=$ROLE_ARN"
+      echo "      --set-string serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=$ROLE_ARN"
       echo ""
       if confirm "Install now?"; then
         if ! helm repo list 2>/dev/null | grep -q "eip-controller"; then
@@ -687,7 +687,7 @@ if step_header "Step 8 — Helm install"; then
           --set aws.clusterName="$CLUSTER_NAME" \
           --set bam.registerURL="$BAM_REGISTER" \
           --set bam.removeURL="$BAM_REMOVE" \
-          --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$ROLE_ARN"
+          --set-string "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$ROLE_ARN"
         pass "eip-controller installed"
       fi
     fi
