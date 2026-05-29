@@ -47,6 +47,28 @@ pause() {
   esac
 }
 
+# subnet_route_target <subnet-id> <vpc-id> <region>
+# Returns the 0.0.0.0/0 next-hop: igw-xxx, nat-xxx, or "none".
+# Falls back to the VPC main route table when the subnet has no explicit association.
+subnet_route_target() {
+  local sn="$1" vpc="$2" region="$3" target=""
+  target=$(aws ec2 describe-route-tables \
+    --filters "Name=association.subnet-id,Values=$sn" \
+    --region "$region" \
+    --query 'RouteTables[0].Routes[?DestinationCidrBlock==`0.0.0.0/0`]|[0]' \
+    --output text 2>/dev/null \
+    | awk '{for(i=1;i<=NF;i++) if($i~/^(igw|nat)-/) print $i; exit}')
+  if [ -z "$target" ]; then
+    target=$(aws ec2 describe-route-tables \
+      --filters "Name=vpc-id,Values=$vpc" "Name=association.main,Values=true" \
+      --region "$region" \
+      --query 'RouteTables[0].Routes[?DestinationCidrBlock==`0.0.0.0/0`]|[0]' \
+      --output text 2>/dev/null \
+      | awk '{for(i=1;i<=NF;i++) if($i~/^(igw|nat)-/) print $i; exit}')
+  fi
+  echo "${target:-none}"
+}
+
 # ─── detect defaults ──────────────────────────────────────────────────────────
 DETECTED_REGION=$(aws configure get region 2>/dev/null || echo "eu-central-1")
 DETECTED_CLUSTER=$(kubectl config current-context 2>/dev/null | sed 's/.*@//' | cut -d. -f1 || echo "")
@@ -105,6 +127,7 @@ confirm "Proceed with these settings?" || { echo "Exiting."; exit 0; }
 
 # initialise variables that may remain unset if steps are skipped
 OIDC_ID=""; OIDC_ISSUER=""; ROLE_ARN=""
+VERIFIED_IGW_SUBNETS=""; VERIFIED_NAT_SUBNETS=""
 
 # ─── Step 1: VPC subnets ──────────────────────────────────────────────────────
 if step_header "Step 1 — VPC: public + private subnets"; then
@@ -128,47 +151,50 @@ if step_header "Step 1 — VPC: public + private subnets"; then
     --region "$REGION" \
     --query 'Subnets[*].SubnetId' --output text 2>/dev/null)
 
-  if [ -n "$PUBLIC_SUBNETS" ]; then
-    pass "Public subnets found: $PUBLIC_SUBNETS"
-  else
-    fail "No public subnets found in VPC $VPC_ID. Scraper nodes require public subnets with an IGW route."
-  fi
+  # Check every subnet by its actual route table, not just the map-public-ip flag.
+  # A subnet can have map-public-ip-on-launch=false but still route to an IGW — that
+  # would land the controller in a public subnet and break IRSA credential exchange.
+  ALL_SUBNETS=$(aws ec2 describe-subnets \
+    --filters "Name=vpc-id,Values=$VPC_ID" \
+    --region "$REGION" \
+    --query 'Subnets[*].SubnetId' --output text 2>/dev/null)
 
-  if [ -n "$PRIVATE_SUBNETS" ]; then
-    pass "Private subnets found: $PRIVATE_SUBNETS"
-  else
-    fail "No private subnets found in VPC $VPC_ID. The controller requires private subnets with a NAT Gateway route."
-    warn "Cannot continue without private subnets. Add private subnets + NAT Gateway to your VPC first."
-  fi
+  info "Checking route tables for all subnets in $VPC_ID ..."
+  echo ""
 
-  # verify IGW on public subnets and NAT on private subnets
-  for sn in $PUBLIC_SUBNETS; do
-    ROUTE=$(aws ec2 describe-route-tables \
-      --filters "Name=association.subnet-id,Values=$sn" \
-      --region "$REGION" \
-      --query 'RouteTables[0].Routes[?DestinationCidrBlock==`0.0.0.0/0`].GatewayId' \
-      --output text 2>/dev/null)
-    if echo "$ROUTE" | grep -q "igw-"; then
-      pass "Subnet $sn → IGW ✔"
-    else
-      warn "Subnet $sn has no IGW route — scraper pods won't have EIP egress"
-    fi
-    break  # check just one as a sample
+  for sn in $ALL_SUBNETS; do
+    target=$(subnet_route_target "$sn" "$VPC_ID" "$REGION")
+    case "$target" in
+      igw-*)
+        pass "$sn  →  IGW  (public — use for scraper-ng)"
+        VERIFIED_IGW_SUBNETS="$VERIFIED_IGW_SUBNETS $sn"
+        ;;
+      nat-*)
+        pass "$sn  →  NAT  (private — use for system-ng)"
+        VERIFIED_NAT_SUBNETS="$VERIFIED_NAT_SUBNETS $sn"
+        ;;
+      *)
+        warn "$sn  →  no internet route (isolated — skip for both node groups)"
+        ;;
+    esac
   done
 
-  for sn in $PRIVATE_SUBNETS; do
-    ROUTE=$(aws ec2 describe-route-tables \
-      --filters "Name=association.subnet-id,Values=$sn" \
-      --region "$REGION" \
-      --query 'RouteTables[0].Routes[?DestinationCidrBlock==`0.0.0.0/0`].NatGatewayId' \
-      --output text 2>/dev/null)
-    if echo "$ROUTE" | grep -q "nat-"; then
-      pass "Subnet $sn → NAT Gateway ✔"
-    else
-      warn "Subnet $sn has no NAT Gateway route — controller won't have internet access"
-    fi
-    break  # check just one as a sample
-  done
+  VERIFIED_IGW_SUBNETS="${VERIFIED_IGW_SUBNETS# }"
+  VERIFIED_NAT_SUBNETS="${VERIFIED_NAT_SUBNETS# }"
+
+  echo ""
+  if [ -z "$VERIFIED_IGW_SUBNETS" ]; then
+    fail "No subnets with an IGW route found — scraper nodes cannot get EIPs without a public subnet."
+  else
+    info "Subnets for scraper-ng : $VERIFIED_IGW_SUBNETS"
+  fi
+
+  if [ -z "$VERIFIED_NAT_SUBNETS" ]; then
+    fail "No subnets with a NAT Gateway route found — the controller cannot reach AWS APIs without one."
+    warn "Create a private subnet, attach a NAT Gateway route to it, then re-run this script."
+  else
+    info "Subnets for system-ng  : $VERIFIED_NAT_SUBNETS"
+  fi
 
 fi # end step 1
 
@@ -202,8 +228,13 @@ if step_header "Step 2 — Node groups"; then
   else
     warn "Scraper node group '$SCRAPER_NG' does not exist"
     echo ""
-    echo "  To create it, you need to pick public subnets from the list above."
-    printf "  Enter public subnet IDs (comma-separated): "
+    if [ -n "$VERIFIED_IGW_SUBNETS" ]; then
+      info "Verified public subnets (IGW route) available for scraper-ng:"
+      for _sn in $VERIFIED_IGW_SUBNETS; do echo "      $_sn"; done
+    else
+      warn "No verified public subnets found — run Step 1 first or enter subnet IDs manually."
+    fi
+    printf "  Enter public subnet IDs to use (comma-separated): "
     read -r SCRAPER_SUBNETS
     if [ -n "$SCRAPER_SUBNETS" ] && confirm "Create scraper node group '$SCRAPER_NG' in subnets $SCRAPER_SUBNETS?"; then
       eksctl create nodegroup \
@@ -235,8 +266,13 @@ if step_header "Step 2 — Node groups"; then
   else
     warn "System node group '$SYSTEM_NG' does not exist"
     echo ""
-    echo "  To create it, you need to pick private subnets from the list above."
-    printf "  Enter private subnet IDs (comma-separated): "
+    if [ -n "$VERIFIED_NAT_SUBNETS" ]; then
+      info "Verified private subnets (NAT route) available for system-ng:"
+      for _sn in $VERIFIED_NAT_SUBNETS; do echo "      $_sn"; done
+    else
+      warn "No verified private subnets found — run Step 1 first or enter subnet IDs manually."
+    fi
+    printf "  Enter private subnet IDs to use (comma-separated): "
     read -r SYSTEM_SUBNETS
     if [ -n "$SYSTEM_SUBNETS" ] && confirm "Create system node group '$SYSTEM_NG' in subnets $SYSTEM_SUBNETS?"; then
       eksctl create nodegroup \
