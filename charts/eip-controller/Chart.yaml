@@ -2,7 +2,7 @@ apiVersion: v2
 name: eip-controller
 description: Per-pod Elastic IP lifecycle controller for EKS scraper workloads
 type: application
-version: 0.1.4
+version: 0.1.5
 appVersion: "0.1.0"
 keywords:
   - kubernetes

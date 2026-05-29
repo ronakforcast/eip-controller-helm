@@ -35,6 +35,13 @@ serviceAccount:
   #   eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/EIPController
   annotations: {}
 
+# Pin the controller to specific nodes — recommended: set to the system node group
+# so the controller never lands on scraper nodes or general workload nodes.
+# Example:
+#   nodeSelector:
+#     eks.amazonaws.com/nodegroup: system-ng
+nodeSelector: {}
+
 leaderElection:
   enabled: true
 
